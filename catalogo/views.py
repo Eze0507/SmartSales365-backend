@@ -7,6 +7,7 @@ from catalogo.serializers.serializers_producto import ProductoSerializer
 from administracion.core.utils import registrar_bitacora
 import requests
 from django.conf import settings
+from rest_framework import viewsets, filters
 
 # Create your views here.
 
@@ -97,6 +98,9 @@ class CatalogoViewSet(viewsets.ModelViewSet):
     """
     queryset = Catalogo.objects.all().order_by('-fecha_creacion')
     serializer_class = CatalogoSerializer
+
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['nombre', 'marca__nombre', 'categoria__nombre', 'sku', 'descripcion']
 
     # --- LÓGICA DE IMG BB (adaptada de VehiculoViewSet) ---
 

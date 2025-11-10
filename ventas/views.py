@@ -14,8 +14,16 @@ class CartViewSet(viewsets.GenericViewSet):
     serializer_class = CartSerializer
 
     def get_cart(self):
-        # Método auxiliar para no repetir código
-        cart, created = Cart.objects.get_or_create(user=self.request.user)
+        # Si el usuario ya inició sesión, úsalo.
+        if self.request.user.is_authenticated:
+            user = self.request.user
+        else:
+            # TRUCO TEMPORAL: Si no está logueado, usa (o crea) un usuario "dummy"
+            User = get_user_model()
+            user, _ = User.objects.get_or_create(username='usuario_pruebas')
+
+        # Ahora siempre tendrás un 'user' real, sea el tuyo o el de pruebas
+        cart, created = Cart.objects.get_or_create(user=user)
         return cart
 
     @action(detail=False, methods=['get'])
