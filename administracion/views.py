@@ -477,6 +477,16 @@ class DepartamentoViewSet(viewsets.ModelViewSet):
 class CiudadViewSet(viewsets.ModelViewSet):
     queryset = Ciudad.objects.all()
     serializer_class = CiudadSerializer
+    
+    def get_queryset(self):
+        """Filtrar ciudades por departamento si se especifica en la query"""
+        queryset = Ciudad.objects.all()
+        departamento_id = self.request.query_params.get('departamento', None)
+        
+        if departamento_id is not None:
+            queryset = queryset.filter(departamento_id=departamento_id)
+        
+        return queryset
 
 class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()
