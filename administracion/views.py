@@ -12,7 +12,7 @@ from .core.utils import registrar_bitacora
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt 
 from rest_framework.views import APIView
-
+from django.contrib.auth.hashers import check_password
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -43,6 +43,17 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "email": getattr(self.user, "email", ""),
             "is_staff": self.user.is_staff,
         }
+        
+        # Registrar login en bitácora
+        from .core.utils import registrar_bitacora
+        registrar_bitacora(
+            request=self.context.get('request'),
+            usuario=self.user,
+            accion="LOGIN",
+            descripcion=f"Usuario '{self.user.username}' inició sesión exitosamente",
+            modulo="Autenticacion"
+        )
+        
         return data
 
 
@@ -72,9 +83,239 @@ class LogoutView(APIView):
             refresh_token = request.data["refresh"]
             token = RefreshToken(refresh_token)
             token.blacklist()
+            
+            # Registrar logout en bitácora
+            registrar_bitacora(
+                request=request,
+                usuario=request.user,
+                accion="LOGOUT",
+                descripcion=f"Usuario '{request.user.username}' cerró sesión",
+                modulo="Autenticacion"
+            )
+            
             return Response({"message": "Logout exitoso"}, status=status.HTTP_205_RESET_CONTENT)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RegisterView(APIView):
+    """Vista pública para registrar nuevos usuarios.
+    
+    No requiere autenticación. Crea usuario y devuelve tokens JWT automáticamente.
+    Body esperado: { "username": "...", "email": "...", "password": "...", "password_confirm": "..." }
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # Validar datos requeridos
+        username = request.data.get('username')
+        email = request.data.get('email')
+        password = request.data.get('password')
+        password_confirm = request.data.get('password_confirm')
+
+        if not all([username, email, password, password_confirm]):
+            return Response(
+                {"error": "Todos los campos son requeridos: username, email, password, password_confirm"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar que las contraseñas coincidan
+        if password != password_confirm:
+            return Response(
+                {"error": "Las contraseñas no coinciden"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar longitud de contraseña
+        if len(password) < 8:
+            return Response(
+                {"error": "La contraseña debe tener al menos 8 caracteres"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verificar si el usuario ya existe
+        if User.objects.filter(username=username).exists():
+            return Response(
+                {"error": "El nombre de usuario ya está en uso"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verificar si el email ya existe
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {"error": "El email ya está en uso"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Crear el usuario
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password
+            )
+
+            # Registrar en bitácora
+            registrar_bitacora(
+                request=request,
+                usuario=user,
+                accion="REGISTRO",
+                descripcion=f"Nuevo usuario registrado: '{user.username}' con email '{user.email}'",
+                modulo="Autenticacion"
+            )
+
+            # Generar tokens JWT
+            refresh = RefreshToken.for_user(user)
+            
+            return Response({
+                "message": "Usuario registrado exitosamente",
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "is_staff": user.is_staff,
+                },
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {"error": f"Error al crear el usuario: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ProfileView(APIView):
+    """Vista para ver y editar el perfil del usuario autenticado.
+    
+    GET: Obtiene información del perfil actual
+    PUT/PATCH: Actualiza información del perfil (username, email, first_name, last_name)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_staff": user.is_staff,
+            "date_joined": user.date_joined,
+        })
+
+    def put(self, request):
+        user = request.user
+        data = request.data
+
+        # Validar si username está disponible (si se cambió)
+        new_username = data.get('username', user.username)
+        if new_username != user.username and User.objects.filter(username=new_username).exists():
+            return Response(
+                {"error": "El nombre de usuario ya está en uso"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar si email está disponible (si se cambió)
+        new_email = data.get('email', user.email)
+        if new_email != user.email and User.objects.filter(email=new_email).exists():
+            return Response(
+                {"error": "El email ya está en uso"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Actualizar campos
+        user.username = new_username
+        user.email = new_email
+        user.first_name = data.get('first_name', user.first_name)
+        user.last_name = data.get('last_name', user.last_name)
+        user.save()
+
+        # Registrar en bitácora
+        registrar_bitacora(
+            request=request,
+            usuario=user,
+            accion="EDITAR PERFIL",
+            descripcion=f"Usuario '{user.username}' actualizó su perfil",
+            modulo="Administracion"
+        )
+
+        return Response({
+            "message": "Perfil actualizado exitosamente",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            }
+        })
+
+
+class ChangePasswordView(APIView):
+    """Vista para cambiar la contraseña del usuario autenticado.
+    
+    Body esperado: {
+        "old_password": "contraseña_actual",
+        "new_password": "nueva_contraseña",
+        "new_password_confirm": "nueva_contraseña"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+        new_password_confirm = request.data.get('new_password_confirm')
+
+        # Validar campos requeridos
+        if not all([old_password, new_password, new_password_confirm]):
+            return Response(
+                {"error": "Todos los campos son requeridos"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar contraseña actual
+        if not check_password(old_password, user.password):
+            return Response(
+                {"error": "La contraseña actual es incorrecta"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar que las nuevas contraseñas coincidan
+        if new_password != new_password_confirm:
+            return Response(
+                {"error": "Las contraseñas nuevas no coinciden"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar longitud de contraseña
+        if len(new_password) < 8:
+            return Response(
+                {"error": "La contraseña debe tener al menos 8 caracteres"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Cambiar contraseña
+        user.set_password(new_password)
+        user.save()
+
+        # Registrar en bitácora
+        registrar_bitacora(
+            request=request,
+            usuario=user,
+            accion="CAMBIAR CONTRASEÑA",
+            descripcion=f"Usuario '{user.username}' cambió su contraseña",
+            modulo="Administracion"
+        )
+
+        return Response({
+            "message": "Contraseña actualizada exitosamente"
+        }, status=status.HTTP_200_OK)
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -236,6 +477,16 @@ class DepartamentoViewSet(viewsets.ModelViewSet):
 class CiudadViewSet(viewsets.ModelViewSet):
     queryset = Ciudad.objects.all()
     serializer_class = CiudadSerializer
+    
+    def get_queryset(self):
+        """Filtrar ciudades por departamento si se especifica en la query"""
+        queryset = Ciudad.objects.all()
+        departamento_id = self.request.query_params.get('departamento', None)
+        
+        if departamento_id is not None:
+            queryset = queryset.filter(departamento_id=departamento_id)
+        
+        return queryset
 
 class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()
