@@ -1,4 +1,6 @@
 from django.db import models
+from django.utils import timezone
+from datetime import timedelta
 
 # Create your models here.
 class Marca(models.Model):
@@ -65,9 +67,33 @@ class Producto(models.Model):
     estado = models.CharField(max_length=15, choices=CHOICE_ESTADO, default='disponible')
     fecha_ingreso = models.DateTimeField(auto_now_add=True) 
     catalogo = models.ForeignKey(Catalogo, on_delete=models.CASCADE, related_name='productos', db_column='Catalogo_id')
+    fecha_venta = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f'N/S: {self.numero_serie} - {self.catalogo.nombre}'
+    
+    @property
+    def garantia_vigente(self):
+        """
+        Devuelve True si el producto está vendido y aún dentro del periodo de garantía.
+        """
+        if self.estado == 'vendido' and self.fecha_venta:
+            # Obtenemos los meses de garantía desde el catálogo relacionado
+            meses = self.catalogo.meses_garantia
+            # Calculamos la fecha de expiración (aproximada, sumando días)
+            fecha_expiracion = self.fecha_venta + timedelta(days=meses*30)
+            
+            return timezone.now() <= fecha_expiracion
+        return False
+    
+    @property
+    def fecha_fin_garantia(self):
+        """
+        Devuelve la fecha exacta en que termina la garantía.
+        """
+        if self.fecha_venta:
+            return self.fecha_venta + timedelta(days=self.catalogo.meses_garantia*30)
+        return None
 
     class Meta:
         verbose_name = 'Ítem de Producto (Serializado)'
