@@ -46,6 +46,11 @@ INSTALLED_APPS = [
     'ventas',
     'catalogo',
     'inteligencia_negocios',
+    
+    
+    'rest_framework_simplejwt',
+    # Necesario para blacklist de refresh tokens (logout)
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
