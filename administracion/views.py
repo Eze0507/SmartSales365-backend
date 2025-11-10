@@ -6,7 +6,8 @@ from django.contrib.auth.models import User, Group, Permission
 from .serializers.serializers_usuario import UserSerializer
 from .serializers.serializers_rol import RoleSerializer, PermissionSerializer
 from .serializers.serializers_cliente import ClienteSerializer, CiudadSerializer, DepartamentoSerializer
-from administracion.models import Departamento, Ciudad, Cliente
+from administracion.models import Departamento, Ciudad, Cliente, RegistroBitacora
+from .serializers.serializers_bitacora import RegistroBitacoraSerializer
 from .core.utils import registrar_bitacora
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt 
@@ -529,3 +530,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             descripcion=f"Se eliminó el cliente: {nombre_cliente}",
             modulo="Clientes"
         )
+
+class RegistroBitacoraViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = RegistroBitacora.objects.all()
+    serializer_class = RegistroBitacoraSerializer
