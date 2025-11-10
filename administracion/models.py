@@ -79,4 +79,4 @@ class Cliente(models.Model):
     class Meta:
         verbose_name = 'Cliente'
         verbose_name_plural = 'Clientes'
-        ordering = ['nombre']
+        ordering = ['-id']
