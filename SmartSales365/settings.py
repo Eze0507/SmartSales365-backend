@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'ventas',
     'catalogo',
     'inteligencia_negocios',
+    'finanzas',  # Módulo de pagos con Stripe
     
     
     'rest_framework_simplejwt',
@@ -166,3 +167,9 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 API_KEY_IMGBB= config('API_KEY_IMGBB', default='')
+
+# ============================================
+# CONFIGURACIÓN DE STRIPE
+# ============================================
+STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='sk_test_51QQkQMITLTTvpAjcEK...')  # Clave secreta de prueba
+STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='pk_test_51QQkQMITLTTvpAjcEK...')  # Clave pública de prueba

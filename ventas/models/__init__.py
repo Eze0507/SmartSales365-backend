@@ -1,11 +1,13 @@
 """
-Importaciones centralizadas de todos los modelos del módulo ventas
-Para mantener compatibilidad con código existente
+Importaciones de modelos del módulo ventas
 """
+# Modelos existentes (Cart)
 from ventas.models.models_cart import Cart, CartItem
+
+# Modelos nuevos (Ventas)
 from ventas.models.models_venta import Venta, DetalleVenta, Pago
 
-# Exportar todos los modelos
+# Exportar todo
 __all__ = [
     'Cart',
     'CartItem',

@@ -18,6 +18,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 
 # ==================== VISTAS DE AUTENTICACIÓN ====================
@@ -36,12 +37,18 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+        
+        # Buscar el cliente asociado al usuario
+        cliente = Cliente.objects.filter(usuario=self.user).first()
+        cliente_id = cliente.id if cliente else None
+        
         # Añade información del usuario a la respuesta del endpoint de login
         data["user"] = {
             "id": self.user.id,
             "username": self.user.username,
             "email": getattr(self.user, "email", ""),
             "is_staff": self.user.is_staff,
+            "cliente_id": cliente_id,
         }
         
         # Registrar login en bitácora
@@ -156,12 +163,22 @@ class RegisterView(APIView):
                 password=password
             )
 
+            # Crear automáticamente un Cliente asociado al usuario
+            cliente = Cliente.objects.create(
+                nombre=username,  # Usar username como nombre inicial
+                telefono='',
+                razon_social='natural',
+                estado='activo',
+                usuario=user,
+                nit_ci=''
+            )
+
             # Registrar en bitácora
             registrar_bitacora(
                 request=request,
                 usuario=user,
                 accion="REGISTRO",
-                descripcion=f"Nuevo usuario registrado: '{user.username}' con email '{user.email}'",
+                descripcion=f"Nuevo usuario registrado: '{user.username}' con email '{user.email}' y cliente asociado (ID: {cliente.id})",
                 modulo="Autenticacion"
             )
 
@@ -175,6 +192,7 @@ class RegisterView(APIView):
                     "username": user.username,
                     "email": user.email,
                     "is_staff": user.is_staff,
+                    "cliente_id": cliente.id,
                 },
                 "access": str(refresh.access_token),
                 "refresh": str(refresh),
@@ -197,6 +215,11 @@ class ProfileView(APIView):
 
     def get(self, request):
         user = request.user
+        
+        # Buscar el cliente asociado al usuario
+        cliente = Cliente.objects.filter(usuario=user).first()
+        cliente_id = cliente.id if cliente else None
+        
         return Response({
             "id": user.id,
             "username": user.username,
@@ -205,6 +228,7 @@ class ProfileView(APIView):
             "last_name": user.last_name,
             "is_staff": user.is_staff,
             "date_joined": user.date_joined,
+            "cliente_id": cliente_id,
         })
 
     def put(self, request):
@@ -487,6 +511,164 @@ class CiudadViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(departamento_id=departamento_id)
         
         return queryset
+
+class MiClienteView(APIView):
+    """Vista para obtener y actualizar el cliente asociado al usuario autenticado.
+    
+    GET: Devuelve el cliente asociado o crea uno si no existe
+    PUT: Actualiza los datos del cliente
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        print(f"DEBUG MiClienteView - Usuario autenticado: {request.user}")
+        print(f"DEBUG MiClienteView - Es anónimo: {request.user.is_anonymous}")
+        
+        user = request.user
+        
+        # Buscar el cliente asociado al usuario
+        cliente = Cliente.objects.filter(usuario=user).first()
+        
+        # Si no existe, crear uno automáticamente
+        if not cliente:
+            cliente = Cliente.objects.create(
+                nombre=user.username,
+                telefono='',
+                razon_social='natural',
+                estado='activo',
+                usuario=user,
+                nit_ci=''
+            )
+            
+            # Registrar en bitácora
+            registrar_bitacora(
+                request=request,
+                usuario=user,
+                accion="CREAR CLIENTE AUTO",
+                descripcion=f"Cliente creado automáticamente para usuario '{user.username}' (ID: {cliente.id})",
+                modulo="Clientes"
+            )
+        
+        serializer = ClienteSerializer(cliente)
+        return Response(serializer.data)
+    
+    def put(self, request):
+        """Actualizar datos del cliente asociado al usuario"""
+        user = request.user
+        
+        # Buscar el cliente asociado
+        cliente = Cliente.objects.filter(usuario=user).first()
+        
+        if not cliente:
+            return Response(
+                {"error": "No tienes un perfil de cliente asociado"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Obtener datos del request
+        data = request.data.copy()
+        
+        # Actualizar campos del cliente
+        if 'nombre' in data:
+            cliente.nombre = data['nombre']
+        if 'email' in data:
+            cliente.email = data['email']
+        if 'telefono' in data:
+            cliente.telefono = data['telefono']
+        if 'direccion' in data:
+            cliente.direccion = data['direccion']
+        if 'nit' in data:
+            cliente.nit_ci = data['nit']
+        
+        try:
+            cliente.save()
+            
+            # Registrar en bitácora
+            registrar_bitacora(
+                request=request,
+                usuario=user,
+                accion="ACTUALIZAR PERFIL",
+                descripcion=f"Usuario '{user.username}' actualizó su perfil de cliente",
+                modulo="Clientes"
+            )
+            
+            serializer = ClienteSerializer(cliente)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Error al actualizar perfil: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class CambiarContrasenaView(APIView):
+    """Vista para cambiar la contraseña del usuario autenticado.
+    
+    POST: Cambia la contraseña del usuario
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        user = request.user
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+        
+        # Validaciones
+        if not current_password or not new_password:
+            return Response(
+                {"error": "Debes proporcionar la contraseña actual y la nueva contraseña"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verificar contraseña actual
+        if not user.check_password(current_password):
+            return Response(
+                {"error": "La contraseña actual es incorrecta"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validar longitud de nueva contraseña
+        if len(new_password) < 8:
+            return Response(
+                {"error": "La nueva contraseña debe tener al menos 8 caracteres"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verificar que la nueva contraseña sea diferente
+        if current_password == new_password:
+            return Response(
+                {"error": "La nueva contraseña debe ser diferente a la actual"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Cambiar contraseña
+            user.set_password(new_password)
+            user.save()
+            
+            # Registrar en bitácora
+            registrar_bitacora(
+                request=request,
+                usuario=user,
+                accion="CAMBIAR CONTRASEÑA",
+                descripcion=f"Usuario '{user.username}' cambió su contraseña",
+                modulo="Seguridad"
+            )
+            
+            return Response(
+                {"message": "Contraseña cambiada exitosamente"},
+                status=status.HTTP_200_OK
+            )
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Error al cambiar contraseña: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()

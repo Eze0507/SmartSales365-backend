@@ -22,5 +22,6 @@ urlpatterns = [
     path('api/', include('administracion.urls')),
     path('api/', include('catalogo.urls')),
     path('api/', include('ventas.urls')),
-    path('', admin.site.urls),
+    path('api/finanzas/', include('finanzas.urls')),  # Rutas de pagos con Stripe
+    path('admin/', admin.site.urls),  # Admin de Django en /admin/
 ]
